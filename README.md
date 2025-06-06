@@ -14,6 +14,39 @@ MitoNet integrates multiple biological databases to create a comprehensive prote
 - **Multiple Data Sources**: STRING, BioGRID, MitoCarta, HPA, and more
 - **Multiple Export Formats**: JSON, GraphML, and CSV network formats
 
+## Quickstart
+
+Want to get started immediately? Here's the fastest way to generate your first mitochondrial protein network:
+
+```bash
+# 1. Clone and setup
+git clone https://github.com/arudhir/mitonet.git
+cd mitonet
+make dev-setup
+
+# 2. Download sample data (choose one)
+# Option A: Use your own data files in networks/ directory
+# Option B: For demo, we'll use built-in sample data
+make dev-test-data
+
+# 3. Build complete database (this may take a few minutes)
+make update-all
+
+# 4. Generate your first networks
+make export-predefined
+
+# 5. Check results
+ls outputs/
+make show-stats
+```
+
+**You'll get**: Three ready-to-analyze networks in `outputs/`:
+- `mitochondrial_network.*` - All mitochondrial proteins and their interactions
+- `muscle_network.*` - All muscle-expressed proteins and interactions  
+- `high_confidence_network.*` - Only high-confidence interactions
+
+Each network comes in multiple formats: JSON (for NetworkX), GraphML (for Cytoscape/Gephi), and CSV (for analysis).
+
 ## Quick Start
 
 ```bash
