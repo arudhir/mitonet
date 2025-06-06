@@ -21,3 +21,4 @@ htmlcov/
 # Outputs
 outputs
 networks
+mitonet.db
