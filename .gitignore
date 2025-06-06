@@ -12,6 +12,12 @@ wheels/
 # Personal
 .env
 
+# Testing and coverage
+.coverage
+coverage.xml
+htmlcov/
+.pytest_cache/
+
 # Outputs
 outputs
 networks
