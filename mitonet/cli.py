@@ -7,6 +7,7 @@ import logging
 from pathlib import Path
 from .database import MitoNetDatabase
 from .ingestion import DataIngestionManager
+from .export import NetworkExporter, NetworkFilter, export_predefined_networks
 
 # Setup logging
 logging.basicConfig(
@@ -121,68 +122,133 @@ def update(ctx, source, force):
             click.echo("No updates were needed")
 
 @cli.command()
-@click.option('--genes', help='Comma-separated list of gene symbols to add')
-@click.option('--uniprots', help='Comma-separated list of UniProt IDs to add')
+@click.option('--filter-type', type=click.Choice(['mitochondrial', 'muscle', 'genes', 'high_confidence', 'all']), 
+              default='all', help='Type of network filter to apply')
+@click.option('--genes', help='Comma-separated list of gene symbols (for genes filter)')
+@click.option('--uniprots', help='Comma-separated list of UniProt IDs (for genes filter)')
+@click.option('--neighbors', type=int, default=0, help='Include N-hop neighbors (0=direct only)')
+@click.option('--min-confidence', type=float, default=0.4, help='Minimum confidence score')
+@click.option('--max-confidence', type=float, help='Maximum confidence score')
+@click.option('--evidence-types', help='Comma-separated evidence types (experimental,database,textmining)')
+@click.option('--min-degree', type=int, help='Minimum protein degree (number of connections)')
+@click.option('--max-degree', type=int, help='Maximum protein degree (number of connections)')
+@click.option('--formats', default='json,graphml,csv', help='Output formats (json,graphml,csv)')
+@click.option('--output-prefix', default='filtered_network', help='Output filename prefix')
+@click.option('--output-dir', default='outputs', help='Output directory')
 @click.pass_context
-def add_genes(ctx, genes, uniprots):
-    """Add new genes to the database"""
+def export_network(ctx, filter_type, genes, uniprots, neighbors, min_confidence, max_confidence,
+                  evidence_types, min_degree, max_degree, formats, output_prefix, output_dir):
+    """Export filtered networks from the complete database"""
     db = ctx.obj['db']
     
-    added_count = 0
+    # Check if database has data
+    stats = db.get_statistics()
+    if stats['num_proteins'] == 0:
+        click.echo("❌ Database is empty. Run 'update' to ingest data first.")
+        return
     
-    if genes:
-        gene_list = [g.strip() for g in genes.split(',')]
-        click.echo(f"Adding {len(gene_list)} genes by symbol...")
+    click.echo(f"Database contains {stats['num_proteins']:,} proteins and {stats['num_interactions']:,} interactions")
+    
+    # Create network filter based on type
+    if filter_type == 'mitochondrial':
+        network_filter = NetworkFilter.mitochondrial_network(min_confidence=min_confidence)
+        click.echo("🧬 Creating mitochondrial protein network...")
         
-        for gene_symbol in gene_list:
-            # Try to find existing protein
-            existing = db.find_protein_by_alias(gene_symbol, 'symbol')
-            if existing:
-                click.echo(f"  - {gene_symbol}: already exists ({existing.uniprot_id})")
-            else:
-                # Create placeholder protein (UniProt ID will be resolved later)
-                placeholder_uniprot = f"TEMP_{gene_symbol}_{added_count}"
-                protein = db.get_or_create_protein(
-                    uniprot_id=placeholder_uniprot,
-                    gene_symbol=gene_symbol
-                )
+    elif filter_type == 'muscle':
+        network_filter = NetworkFilter.muscle_network(min_confidence=min_confidence)
+        click.echo("💪 Creating muscle-expressed protein network...")
+        
+    elif filter_type == 'genes':
+        if not genes and not uniprots:
+            click.echo("❌ For 'genes' filter, provide --genes or --uniprots")
+            return
+        
+        gene_list = []
+        if genes:
+            gene_list.extend([g.strip() for g in genes.split(',')])
+        if uniprots:
+            gene_list.extend([u.strip() for u in uniprots.split(',')])
+            
+        network_filter = NetworkFilter.gene_set_network(
+            genes=gene_list, 
+            include_neighbors=neighbors,
+            min_confidence=min_confidence
+        )
+        click.echo(f"🎯 Creating network for {len(gene_list)} genes with {neighbors}-hop neighbors...")
+        
+    elif filter_type == 'high_confidence':
+        network_filter = NetworkFilter.high_confidence_network(min_confidence=min_confidence)
+        click.echo(f"⭐ Creating high-confidence network (min_confidence={min_confidence})...")
+        
+    else:  # filter_type == 'all'
+        network_filter = NetworkFilter()
+        network_filter.min_confidence = min_confidence
+        click.echo("🌐 Creating complete network...")
+    
+    # Apply additional filters
+    if max_confidence:
+        network_filter.max_confidence = max_confidence
+    if evidence_types:
+        network_filter.evidence_types = set(evidence_types.split(','))
+    if min_degree:
+        network_filter.min_degree = min_degree
+    if max_degree:
+        network_filter.max_degree = max_degree
+    
+    # Setup exporter
+    exporter = NetworkExporter(db, Path(output_dir))
+    format_list = [f.strip() for f in formats.split(',')]
+    
+    try:
+        # Export network
+        output_files = exporter.export_network(
+            network_filter=network_filter,
+            format_types=format_list,
+            filename_prefix=output_prefix
+        )
+        
+        click.echo("✅ Network export completed!")
+        click.echo("\nOutput files:")
+        for format_type, file_path in output_files.items():
+            click.echo(f"  📄 {format_type}: {file_path}")
+            
+    except Exception as e:
+        click.echo(f"❌ Export failed: {e}")
+
+@cli.command()
+@click.option('--output-dir', default='outputs', help='Output directory')
+@click.option('--min-confidence', type=float, default=0.4, help='Minimum confidence score')
+@click.pass_context
+def export_predefined(ctx, output_dir, min_confidence):
+    """Export commonly used predefined networks (mitochondrial, muscle, high-confidence)"""
+    db = ctx.obj['db']
+    
+    # Check if database has data
+    stats = db.get_statistics()
+    if stats['num_proteins'] == 0:
+        click.echo("❌ Database is empty. Run 'update' to ingest data first.")
+        return
+    
+    click.echo(f"Exporting predefined networks from database with {stats['num_proteins']:,} proteins...")
+    
+    try:
+        # Update the global min_confidence for predefined networks
+        from .export import NetworkFilter
+        NetworkFilter.mitochondrial_network.__func__.__defaults__ = (min_confidence,)
+        NetworkFilter.muscle_network.__func__.__defaults__ = (min_confidence,)
+        
+        networks_exported = export_predefined_networks(db, Path(output_dir))
+        
+        click.echo("✅ Predefined networks exported!")
+        click.echo("\nNetworks created:")
+        
+        for network_type, files in networks_exported.items():
+            click.echo(f"\n🔸 {network_type.upper()} network:")
+            for format_type, file_path in files.items():
+                click.echo(f"    📄 {format_type}: {file_path}")
                 
-                # Add alias in the same transaction
-                from .database import ProteinAlias
-                session = db.get_session()
-                try:
-                    # Refresh protein in this session
-                    session.add(protein)
-                    alias = ProteinAlias(
-                        protein_id=protein.id,
-                        alias_type='symbol',
-                        alias_value=gene_symbol,
-                        source_id=None
-                    )
-                    session.add(alias)
-                    session.commit()
-                    click.echo(f"  + {gene_symbol}: added as {placeholder_uniprot}")
-                    added_count += 1
-                except Exception as e:
-                    session.rollback()
-                    click.echo(f"  - {gene_symbol}: failed to add ({e})")
-                finally:
-                    session.close()
-    
-    if uniprots:
-        uniprot_list = [u.strip() for u in uniprots.split(',')]
-        click.echo(f"Adding {len(uniprot_list)} proteins by UniProt ID...")
-        
-        for uniprot_id in uniprot_list:
-            existing = db.get_protein_by_uniprot(uniprot_id)
-            if existing:
-                click.echo(f"  - {uniprot_id}: already exists")
-            else:
-                protein = db.get_or_create_protein(uniprot_id=uniprot_id)
-                click.echo(f"  + {uniprot_id}: added")
-                added_count += 1
-    
-    click.echo(f"\n✅ Added {added_count} new proteins")
+    except Exception as e:
+        click.echo(f"❌ Export failed: {e}")
 
 @cli.command()
 @click.option('--phase', help='Specific processing phase to check')
@@ -221,14 +287,6 @@ def checkpoints(ctx, phase):
     finally:
         session.close()
 
-@cli.command()
-@click.option('--output', '-o', default='mitonet_current.graphml', help='Output file path')
-@click.pass_context
-def export_network(ctx, output):
-    """Export current network from database"""
-    # This would integrate with the existing network export functionality
-    click.echo(f"Exporting network to {output}...")
-    click.echo("Note: Network export functionality to be implemented")
 
 if __name__ == '__main__':
     cli()

@@ -23,8 +23,8 @@ help: ## Show this help message
 	@echo "\033[1;34mData Updates:\033[0m"
 	@grep -E '^update-.*:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 	@echo ""
-	@echo "\033[1;34mNetwork Generation:\033[0m"
-	@grep -E '^(generate-network|export-network):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@echo "\033[1;34mNetwork Export & Filtering:\033[0m"
+	@grep -E '^(export-.*):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "\033[1;34mTesting:\033[0m"
 	@grep -E '^(test.*|quick-test):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -50,21 +50,12 @@ sync: ## Sync dependencies (alias for install)
 	uv sync
 
 # Database operations
-.PHONY: db-init db-status db-add-genes
+.PHONY: db-init db-status
 db-init: ## Initialize the database
 	$(PYTHON) -m mitonet.cli init
 
 db-status: ## Show database status
 	$(PYTHON) -m mitonet.cli status
-
-db-add-genes: ## Add genes to database (use GENES="gene1,gene2" or UNIPROTS="P12345,Q67890")
-	@if [ -n "$(GENES)" ]; then \
-		$(PYTHON) -m mitonet.cli add-genes --genes "$(GENES)"; \
-	elif [ -n "$(UNIPROTS)" ]; then \
-		$(PYTHON) -m mitonet.cli add-genes --uniprots "$(UNIPROTS)"; \
-	else \
-		echo "Usage: make db-add-genes GENES='ATP1A1,MYOD1' or UNIPROTS='P12345,Q67890'"; \
-	fi
 
 # Data ingestion
 .PHONY: update-all update-string update-biogrid update-mitocarta update-hpa
@@ -84,17 +75,46 @@ update-mitocarta: ## Update MitoCarta data
 update-hpa: ## Update HPA muscle data
 	$(PYTHON) -m mitonet.cli update --source HPA_muscle
 
-# Network generation
-.PHONY: generate-network export-network
-generate-network: ## Generate network from current database
-	$(PYTHON) -m mitonet.cli export-network --format all
+# Network export and filtering
+.PHONY: export-all export-mitochondrial export-muscle export-genes export-high-confidence export-predefined
+export-all: ## Export complete network (all proteins and interactions)
+	$(PYTHON) -m mitonet.cli export-network --filter-type all
 
-export-network: ## Export network in specific format (use FORMAT=json|graphml|csv)
-	@if [ -n "$(FORMAT)" ]; then \
-		$(PYTHON) -m mitonet.cli export-network --format $(FORMAT); \
+export-mitochondrial: ## Export mitochondrial protein network
+	$(PYTHON) -m mitonet.cli export-network --filter-type mitochondrial
+
+export-muscle: ## Export muscle-expressed protein network
+	$(PYTHON) -m mitonet.cli export-network --filter-type muscle
+
+export-genes: ## Export network for specific genes (use GENES="ATP1A1,MYOD1" NEIGHBORS=1)
+	@if [ -n "$(GENES)" ]; then \
+		$(PYTHON) -m mitonet.cli export-network --filter-type genes --genes "$(GENES)" --neighbors $(NEIGHBORS); \
+	elif [ -n "$(UNIPROTS)" ]; then \
+		$(PYTHON) -m mitonet.cli export-network --filter-type genes --uniprots "$(UNIPROTS)" --neighbors $(NEIGHBORS); \
 	else \
-		echo "Usage: make export-network FORMAT=json"; \
-		echo "Available formats: json, graphml, csv, all"; \
+		echo "Usage: make export-genes GENES='ATP1A1,MYOD1' NEIGHBORS=1"; \
+		echo "   or: make export-genes UNIPROTS='P12345,Q67890' NEIGHBORS=1"; \
+	fi
+
+export-high-confidence: ## Export high-confidence interactions only (use CONFIDENCE=0.7)
+	$(PYTHON) -m mitonet.cli export-network --filter-type high_confidence --min-confidence $(or $(CONFIDENCE),0.7)
+
+export-predefined: ## Export predefined networks (mitochondrial, muscle, high-confidence)
+	$(PYTHON) -m mitonet.cli export-predefined
+
+# Custom network export
+export-custom: ## Export custom filtered network (use FILTER_TYPE, MIN_CONF, etc.)
+	@if [ -n "$(FILTER_TYPE)" ]; then \
+		$(PYTHON) -m mitonet.cli export-network --filter-type $(FILTER_TYPE) \
+			$(if $(MIN_CONF),--min-confidence $(MIN_CONF)) \
+			$(if $(MAX_CONF),--max-confidence $(MAX_CONF)) \
+			$(if $(GENES),--genes "$(GENES)") \
+			$(if $(NEIGHBORS),--neighbors $(NEIGHBORS)) \
+			$(if $(FORMATS),--formats "$(FORMATS)") \
+			$(if $(OUTPUT),--output-prefix $(OUTPUT)); \
+	else \
+		echo "Usage: make export-custom FILTER_TYPE=mitochondrial MIN_CONF=0.5"; \
+		echo "Available FILTER_TYPE: mitochondrial, muscle, genes, high_confidence, all"; \
 	fi
 
 # Legacy pipeline
@@ -166,14 +186,26 @@ show-stats: ## Show database statistics
 .PHONY: dev-setup dev-reset dev-test-data
 dev-setup: install-dev db-init ## Setup development environment
 	@echo "Development environment ready!"
-	@echo "Try: make db-add-genes GENES='ATP1A1,MYOD1,CYC1'"
+	@echo "Try: make update-all && make export-predefined"
 
 dev-reset: clean db-init ## Reset development environment
 	@echo "Development environment reset!"
 
-dev-test-data: ## Add test data for development
-	$(PYTHON) -m mitonet.cli add-genes --genes "ATP1A1,MYOD1,CYC1,NDUFA1,ACTA1"
-	@echo "Test data added to database"
+dev-test-data: ## Add sample data for development (requires data files)
+	@echo "Loading sample data sources..."
+	@if [ -f "networks/string/9606.protein.aliases.v12.0.txt.gz" ]; then \
+		$(PYTHON) -m mitonet.cli update --source STRING_aliases; \
+		echo "✅ STRING aliases loaded"; \
+	else \
+		echo "⚠️  STRING data not found - download to networks/string/"; \
+	fi
+	@if [ -f "networks/mitocarta/Human.MitoCarta3.0.xls" ]; then \
+		$(PYTHON) -m mitonet.cli update --source MitoCarta; \
+		echo "✅ MitoCarta data loaded"; \
+	else \
+		echo "⚠️  MitoCarta data not found - download to networks/mitocarta/"; \
+	fi
+	@echo "Sample data loading attempted - check database status with 'make db-status'"
 
 # Quick workflows
 .PHONY: quick-test full-pipeline demo
@@ -181,10 +213,10 @@ quick-test: ## Run quick tests for development
 	$(PYTEST) $(TEST_DIR)/unit/test_database.py::TestMitoNetDatabase::test_initialize_database -v
 	$(PYTEST) $(TEST_DIR)/unit/test_cli.py::TestCLICommands::test_help_command -v
 
-full-pipeline: dev-setup dev-test-data update-all generate-network ## Run complete pipeline end-to-end
-	@echo "Full pipeline completed!"
+full-pipeline: dev-setup dev-test-data update-all export-predefined ## Run complete pipeline end-to-end
+	@echo "Full pipeline completed! Check outputs/ directory for networks."
 
-demo: dev-setup ## Setup demo environment with sample data
-	$(PYTHON) -m mitonet.cli add-genes --genes "ATP1A1,MYOD1,CYC1,NDUFA1,ACTA1,TPM1,CYCS"
-	@echo "Demo environment ready with sample proteins!"
+demo: dev-setup dev-test-data ## Setup demo environment with sample data
+	@echo "Demo environment ready!"
 	@echo "Try: make show-stats"
+	@echo "Then: make export-mitochondrial or make export-muscle"

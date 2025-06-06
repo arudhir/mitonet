@@ -4,13 +4,15 @@ A comprehensive mitochondrial protein network integration pipeline with incremen
 
 ## Overview
 
-MitoNet integrates multiple biological databases to create comprehensive protein interaction networks focused on mitochondrial and muscle-expressed proteins. The pipeline features:
+MitoNet integrates multiple biological databases to create a comprehensive protein interaction database, then allows you to generate customized network views through powerful filtering. The pipeline features:
 
+- **Complete Database Approach**: Ingest ALL protein interactions from all sources into one comprehensive database
+- **Flexible Network Filtering**: Generate mitochondrial, muscle, gene-specific, or custom networks from the same data
 - **Incremental Updates**: Only process changed data files, with intelligent change detection
-- **Modular Architecture**: Clean separation of database, ingestion, and CLI components  
+- **Modular Architecture**: Clean separation of database, ingestion, filtering, and export components  
 - **Comprehensive Testing**: Full test suite with unit, integration, and CLI tests
 - **Multiple Data Sources**: STRING, BioGRID, MitoCarta, HPA, and more
-- **Flexible Export**: JSON, GraphML, and CSV network formats
+- **Multiple Export Formats**: JSON, GraphML, and CSV network formats
 
 ## Quick Start
 
@@ -18,8 +20,11 @@ MitoNet integrates multiple biological databases to create comprehensive protein
 # Setup development environment
 make dev-setup
 
-# Add some genes to get started
-make db-add-genes GENES="ATP1A1,MYOD1,CYC1,NDUFA1"
+# Ingest all available data sources
+make update-all
+
+# Export predefined networks (mitochondrial, muscle, high-confidence)
+make export-predefined
 
 # Check what's in the database
 make show-stats
@@ -47,7 +52,7 @@ uv sync
 pip install -e .
 ```
 
-## Building the Full Database
+## Building the Complete Database
 
 ### 1. Initialize and Setup
 
@@ -60,45 +65,24 @@ make install-dev
 make db-init
 ```
 
-### 2. Add Your Genes of Interest
+### 2. Ingest Complete Datasets from All Sources
 
-```bash
-# Add genes by symbol
-make db-add-genes GENES="ATP1A1,MYOD1,CYC1,NDUFA1,ACTA1,TPM1"
-
-# Or add by UniProt ID
-make db-add-genes UNIPROTS="P12345,Q67890,P00123"
-
-# Check what was added
-make show-stats
-```
-
-### 3. Ingest Data from All Sources
+The new architecture ingests ALL proteins and interactions from each data source, creating a comprehensive database that you can filter later:
 
 ```bash
 # Update all data sources at once
 make update-all
 
 # Or update specific sources individually:
-make update-string    # STRING protein aliases and interactions
-make update-biogrid   # BioGRID interactions
-make update-mitocarta # MitoCarta mitochondrial annotations
-make update-hpa       # Human Protein Atlas muscle expression
+make update-string    # STRING protein aliases and interactions (COMPLETE dataset)
+make update-biogrid   # BioGRID interactions (COMPLETE dataset)
+make update-mitocarta # MitoCarta mitochondrial annotations (ALL proteins)
+make update-hpa       # Human Protein Atlas muscle expression (ALL proteins)
 ```
 
-### 4. Generate Network Files
+This step processes complete datasets and may take some time, but only needs to be done once per data source version.
 
-```bash
-# Export network in all formats (JSON, GraphML, CSV)
-make generate-network
-
-# Or export specific format
-make export-network FORMAT=json
-make export-network FORMAT=graphml
-make export-network FORMAT=csv
-```
-
-### 5. Monitor Progress
+### 3. Monitor Database Building
 
 ```bash
 # Check database statistics
@@ -108,19 +92,41 @@ make show-stats
 make checkpoints
 ```
 
-## Iterating on the Database
+You should see the database grow to contain hundreds of thousands of proteins and millions of interactions.
 
-### Adding New Genes
+### 4. Export Filtered Networks
+
+Once the complete database is built, you can quickly generate different network views:
 
 ```bash
-# Add more genes to existing database
-make db-add-genes GENES="COX1,COX2,ATP6"
+# Export commonly used networks
+make export-predefined
 
-# Update data sources (only processes changed files)
-make update-all
+# Or export specific network types
+make export-mitochondrial    # Only mitochondrial proteins
+make export-muscle          # Only muscle-expressed proteins  
+make export-all             # Complete network (all proteins)
+make export-high-confidence # High-confidence interactions only
+```
 
-# Re-export updated network
-make generate-network
+## Iterating on the Database
+
+### Exploring Different Networks from the Same Data
+
+The power of the complete database approach is that you can generate many different network views without re-ingesting data:
+
+```bash
+# Start with a mitochondrial network
+make export-mitochondrial
+
+# Then explore muscle-specific networks
+make export-muscle
+
+# Focus on specific genes with their neighbors
+make export-genes GENES="ATP1A1,MYOD1,CYC1" NEIGHBORS=1
+
+# Try different confidence thresholds
+make export-high-confidence CONFIDENCE=0.8
 ```
 
 ### Updating Data Sources
@@ -138,22 +144,39 @@ make update-string
 make show-stats
 ```
 
-### Incremental Workflow Example
+### Iterative Analysis Workflow
 
 ```bash
-# Start with a small set
+# Build the complete database once
 make dev-setup
-make db-add-genes GENES="ATP1A1,MYOD1"
-make update-string
-make generate-network
+make update-all
 
-# Later, expand your analysis
-make db-add-genes GENES="CYC1,NDUFA1,COX1"  # Add more genes
+# Then quickly generate different views for analysis
+make export-mitochondrial                    # For mitochondrial analysis
+make export-muscle                          # For muscle tissue analysis  
+make export-genes GENES="ATP1A1,NDUFA1" NEIGHBORS=2  # For specific gene analysis
+
+# When new data becomes available, update and re-export
 make update-mitocarta                        # Add new data source
-make generate-network                        # Re-export
+make export-predefined                       # Re-export all common networks
 
 # Check what changed
 make show-stats
+```
+
+### Custom Network Generation
+
+Generate highly specific networks using advanced filtering:
+
+```bash
+# High-confidence mitochondrial network
+make export-custom FILTER_TYPE=mitochondrial MIN_CONF=0.8
+
+# Muscle network with experimental evidence only
+make export-custom FILTER_TYPE=muscle MIN_CONF=0.5 EVIDENCE_TYPES=experimental
+
+# Gene-specific network with 2-hop neighbors
+make export-custom FILTER_TYPE=genes GENES="ATP1A1,COX1" NEIGHBORS=2 MIN_CONF=0.6
 ```
 
 ## Testing
@@ -274,13 +297,16 @@ Networks are exported to the `outputs/` directory:
 make help
 
 # Key commands:
-make dev-setup         # Setup development environment
-make db-add-genes      # Add genes to database (use GENES="...")
-make update-all        # Update all data sources
-make generate-network  # Export network files
-make test             # Run test suite
-make show-stats       # Show database statistics
-make clean            # Clean temporary files
+make dev-setup              # Setup development environment
+make update-all             # Ingest all data sources into complete database
+make export-predefined      # Export common networks (mitochondrial, muscle, high-confidence)
+make export-mitochondrial   # Export mitochondrial protein network
+make export-muscle          # Export muscle-expressed protein network
+make export-genes           # Export gene-specific network (use GENES="..." NEIGHBORS=1)
+make export-custom          # Export custom filtered network (use FILTER_TYPE=...)
+make test                   # Run test suite
+make show-stats             # Show database statistics
+make clean                  # Clean temporary files
 ```
 
 ## Advanced Usage
@@ -291,7 +317,9 @@ make clean            # Clean temporary files
 # The Makefile wraps the CLI, but you can use it directly:
 uv run python -m mitonet.cli --help
 uv run python -m mitonet.cli init
-uv run python -m mitonet.cli add-genes --genes "ATP1A1,MYOD1"
+uv run python -m mitonet.cli update --source STRING_aliases
+uv run python -m mitonet.cli export-network --filter-type mitochondrial
+uv run python -m mitonet.cli export-predefined
 uv run python -m mitonet.cli status
 ```
 
@@ -319,6 +347,7 @@ mitonet/
 ├── mitonet/              # Main package
 │   ├── database.py       # Database models and operations
 │   ├── ingestion.py      # Data ingestion and processing
+│   ├── export.py         # Network filtering and export
 │   └── cli.py           # Command-line interface
 ├── tests/               # Test suite
 │   ├── unit/            # Unit tests

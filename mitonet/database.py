@@ -277,6 +277,11 @@ class MitoNetDatabase:
         """Add or update an interaction"""
         session = self.get_session()
         try:
+            # Merge proteins and source into current session
+            protein1 = session.merge(protein1)
+            protein2 = session.merge(protein2)
+            source = session.merge(source)
+            
             # Ensure consistent ordering (smaller ID first)
             if protein1.id > protein2.id:
                 protein1, protein2 = protein2, protein1

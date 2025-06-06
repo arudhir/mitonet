@@ -46,54 +46,42 @@ class TestCLICommands:
         assert "Interactions: 0" in result.output
         assert "Data sources: 0" in result.output
     
-    def test_add_genes_command(self, runner, mock_db_path):
-        """Test adding genes via CLI"""
+    def test_export_network_empty_db(self, runner, mock_db_path):
+        """Test export network command on empty database"""
         # Initialize database
         runner.invoke(cli, ['--db-path', mock_db_path, 'init'])
         
-        # Add genes
+        # Try to export from empty database
         result = runner.invoke(cli, [
             '--db-path', mock_db_path,
-            'add-genes',
-            '--genes', 'ATP1A1,MYOD1,CYC1'
+            'export-network',
+            '--filter-type', 'all'
         ])
         
         assert result.exit_code == 0
-        assert "Adding 3 genes" in result.output
-        assert "ATP1A1: added" in result.output
-        assert "✅ Added 3 new proteins" in result.output
+        assert "Database is empty" in result.output
     
-    def test_add_uniprots_command(self, runner, mock_db_path):
-        """Test adding UniProt IDs via CLI"""
+    def test_export_network_command_help(self, runner, mock_db_path):
+        """Test export network command help"""
+        result = runner.invoke(cli, ['export-network', '--help'])
+        
+        assert result.exit_code == 0
+        assert "Export filtered networks" in result.output
+        assert "--filter-type" in result.output
+    
+    def test_export_predefined_empty_db(self, runner, mock_db_path):
+        """Test export predefined command on empty database"""
         # Initialize database
         runner.invoke(cli, ['--db-path', mock_db_path, 'init'])
         
-        # Add UniProt IDs
+        # Try to export predefined networks from empty database
         result = runner.invoke(cli, [
             '--db-path', mock_db_path,
-            'add-genes',
-            '--uniprots', 'P12345,Q67890'
+            'export-predefined'
         ])
         
         assert result.exit_code == 0
-        assert "Adding 2 proteins by UniProt ID" in result.output
-        assert "✅ Added 2 new proteins" in result.output
-    
-    def test_status_after_adding_genes(self, runner, mock_db_path):
-        """Test status command after adding genes"""
-        # Initialize and add genes
-        runner.invoke(cli, ['--db-path', mock_db_path, 'init'])
-        runner.invoke(cli, [
-            '--db-path', mock_db_path,
-            'add-genes',
-            '--genes', 'ATP1A1,MYOD1'
-        ])
-        
-        # Check status
-        result = runner.invoke(cli, ['--db-path', mock_db_path, 'status'])
-        
-        assert result.exit_code == 0
-        assert "Proteins: 2" in result.output
+        assert "Database is empty" in result.output
     
     def test_checkpoints_command(self, runner, mock_db_path):
         """Test checkpoints command"""
@@ -241,40 +229,39 @@ class TestCLIErrorHandling:
         # (specific behavior depends on implementation)
         assert result.exit_code != 0 or "error" in result.output.lower()
     
-    def test_add_genes_no_arguments(self, runner, tmp_path):
-        """Test add-genes command without arguments"""
+    def test_export_network_invalid_filter(self, runner, tmp_path):
+        """Test export network command with invalid filter type"""
         db_path = str(tmp_path / "test.db")
         runner.invoke(cli, ['--db-path', db_path, 'init'])
         
         result = runner.invoke(cli, [
             '--db-path', db_path,
-            'add-genes'
+            'export-network',
+            '--filter-type', 'invalid_filter'
         ])
         
-        assert result.exit_code == 0
-        assert "✅ Added 0 new proteins" in result.output
+        # Should fail with invalid choice
+        assert result.exit_code == 2
+        assert "Invalid value" in result.output
     
-    def test_add_duplicate_genes(self, runner, tmp_path):
-        """Test adding duplicate genes"""
+    def test_export_genes_no_genes_specified(self, runner, tmp_path):
+        """Test export network with genes filter but no genes specified"""
         db_path = str(tmp_path / "test.db")
         runner.invoke(cli, ['--db-path', db_path, 'init'])
         
-        # Add genes first time
-        runner.invoke(cli, [
-            '--db-path', db_path,
-            'add-genes',
-            '--genes', 'ATP1A1'
-        ])
+        # Add a fake protein to avoid empty database error
+        from mitonet.database import MitoNetDatabase
+        db = MitoNetDatabase(db_path)
+        db.get_or_create_protein(uniprot_id="P12345", gene_symbol="TEST")
         
-        # Add same gene again
         result = runner.invoke(cli, [
             '--db-path', db_path,
-            'add-genes',
-            '--genes', 'ATP1A1'
+            'export-network',
+            '--filter-type', 'genes'
         ])
         
         assert result.exit_code == 0
-        assert "already exists" in result.output
+        assert "For 'genes' filter, provide --genes or --uniprots" in result.output
 
 
 @pytest.mark.cli
@@ -288,44 +275,43 @@ class TestCLIIntegration:
         return CliRunner()
     
     def test_full_workflow(self, runner, tmp_path):
-        """Test complete workflow: init -> add genes -> check status"""
+        """Test complete workflow: init -> status -> export (empty)"""
         db_path = str(tmp_path / "workflow.db")
         
         # Initialize database
         result = runner.invoke(cli, ['--db-path', db_path, 'init'])
         assert result.exit_code == 0
         
-        # Add some genes
-        result = runner.invoke(cli, [
-            '--db-path', db_path,
-            'add-genes',
-            '--genes', 'ATP1A1,MYOD1,CYC1',
-            '--uniprots', 'P12345,Q67890'
-        ])
-        assert result.exit_code == 0
-        assert "Added 5 new proteins" in result.output
-        
-        # Check status
+        # Check status of empty database
         result = runner.invoke(cli, ['--db-path', db_path, 'status'])
         assert result.exit_code == 0
-        assert "Proteins: 5" in result.output
+        assert "Proteins: 0" in result.output
+        
+        # Try to export from empty database
+        result = runner.invoke(cli, [
+            '--db-path', db_path,
+            'export-network',
+            '--filter-type', 'all'
+        ])
+        assert result.exit_code == 0
+        assert "Database is empty" in result.output
         
         # Check that database file exists
         assert Path(db_path).exists()
     
     def test_persistent_data(self, runner, tmp_path):
-        """Test that data persists across CLI invocations"""
+        """Test that database persists across CLI invocations"""
         db_path = str(tmp_path / "persistent.db")
         
-        # Initialize and add data
+        # Initialize database
         runner.invoke(cli, ['--db-path', db_path, 'init'])
-        runner.invoke(cli, [
-            '--db-path', db_path,
-            'add-genes',
-            '--genes', 'TEST_GENE'
-        ])
         
-        # In a new invocation, data should still be there
+        # Check initial status
         result = runner.invoke(cli, ['--db-path', db_path, 'status'])
         assert result.exit_code == 0
-        assert "Proteins: 1" in result.output
+        assert "Proteins: 0" in result.output
+        
+        # In a new invocation, database should still exist
+        result = runner.invoke(cli, ['--db-path', db_path, 'status'])
+        assert result.exit_code == 0
+        assert "Proteins: 0" in result.output
