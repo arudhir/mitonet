@@ -1,0 +1,6 @@
+gene_symbol,gene_description,mitocarta_member,muscle_expressed,protein_evidence_level,main_localization,reactome_pathways,protein_complexes,priority_score,uniprot_id
+ATP5F1A,ATP5F1A protein description,True,True,Evidence at protein level,Mitochondria,"['Pathway1', 'Pathway2']",['Complex1'],1.0,P12345
+NDUFA1,NDUFA1 protein description,True,False,Evidence at protein level,Mitochondria,"['Pathway1', 'Pathway2']",['Complex1'],0.5,Q67890
+ACTA1,ACTA1 protein description,False,True,Evidence at protein level,Cytoplasm,[],[],0.5,R11111
+TPM1,TPM1 protein description,False,True,Evidence at protein level,Cytoplasm,[],[],0.5,S22222
+CYCS,CYCS protein description,True,True,Evidence at protein level,Mitochondria,"['Pathway1', 'Pathway2']",['Complex1'],1.0,T33333

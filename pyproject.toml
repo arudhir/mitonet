@@ -1,0 +1,14 @@
+[project]
+name = "mitonet"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pandas>=2.0.0",
+    "numpy>=1.24.0", 
+    "networkx>=3.0.0",
+    "openpyxl>=3.1.0",
+    "xlrd>=2.0.1",
+    "psutil>=5.9.0"
+]
