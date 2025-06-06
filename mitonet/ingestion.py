@@ -127,7 +127,13 @@ class DataIngestionManager:
                 # Process UniProt mappings
                 if alias_source == 'UniProt_AC':
                     protein = self.db.get_or_create_protein(uniprot_id=alias)
-                    self.db.add_protein_alias(protein, 'string', string_id, source)
+                    # Re-fetch source to avoid detached instance issues
+                    fresh_source = self.db.get_or_create_data_source(
+                        name='STRING_aliases',
+                        version=version,
+                        file_path=str(file_path)
+                    )
+                    self.db.add_protein_alias(protein, 'string', string_id, fresh_source)
                     aliases_added += 1
                     
                 # Process gene symbols
@@ -135,7 +141,13 @@ class DataIngestionManager:
                     # Find protein by UniProt ID via string mapping
                     existing_protein = self.db.find_protein_by_alias(string_id, 'string')
                     if existing_protein:
-                        self.db.add_protein_alias(existing_protein, 'symbol', alias, source)
+                        # Re-fetch source to avoid detached instance issues
+                        fresh_source = self.db.get_or_create_data_source(
+                            name='STRING_aliases',
+                            version=version,
+                            file_path=str(file_path)
+                        )
+                        self.db.add_protein_alias(existing_protein, 'symbol', alias, fresh_source)
                         # Update gene symbol if not set
                         if not existing_protein.gene_symbol:
                             session = self.db.get_session()
@@ -211,10 +223,17 @@ class DataIngestionManager:
                     evidence_type = self._classify_string_evidence(row)
                     interaction_type = 'physical' if 'physical' in source_name else 'functional'
                     
+                    # Re-fetch source to avoid detached instance issues
+                    fresh_source = self.db.get_or_create_data_source(
+                        name=source_name,
+                        version=version,
+                        file_path=str(file_path)
+                    )
+                    
                     self.db.add_interaction(
                         protein1=protein1,
                         protein2=protein2,
-                        source=source,
+                        source=fresh_source,
                         confidence_score=confidence,
                         evidence_type=evidence_type,
                         interaction_type=interaction_type,
